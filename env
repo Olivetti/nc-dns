@@ -1,0 +1,13 @@
+### Credentials
+# cid=YOUR_CUSTOMERNUMBER
+# key=YOUR_KEY
+#  pw=YOUR_PASSWORD
+#
+# or use pass (https://passwordstore.org)
+# cid=$(pass dns/netcup/cid)
+# key=$(pass dns/netcup/key)
+#  pw=$(pass dns/netcup/pw)
+
+cid=""
+key=""
+ pw=""

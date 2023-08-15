@@ -1,0 +1,528 @@
+#!/usr/bin/env bash
+#set -vux
+#
+# nc-dns
+# © Olivetti 2020-2023
+#
+# based & developed by linux-insideDE @GPN18
+#
+# dependencies:	curl, jq
+# recommended:	pass
+#
+# todo:
+# test restore w/ caa
+
+version="v1.0"
+
+# Credentials in env
+source "${0%/*}/env"
+
+# for color and sound
+[[ -f ~/bin/tools ]] && source ~/bin/tools
+
+sid_file=~/".${0##*/}.sid" # @ $HOME # sid_file="${0%/*}/.${0##*/}.sid"
+url="https://ccp.netcup.net/run/webservice/servers/endpoint.php?JSON"
+client=""
+debug=false
+
+# functions
+_debug()	{ [[ ${debug} = true ]] && echo "${tmp}"; }
+_debug_short()	{ [[ ${debug} = true ]] && echo "${tmp}" | jq -r '.shortmessage'; }
+_debug_curl()	{ curl --trace-ascii - ; } # currently not used
+
+_error()	{ [[ $(echo "${tmp}" | jq -r '.status') != "success" ]] && \
+			{
+				[[ "${1}" ]]		&& err=${1}		&& shift
+				[[ "${1}" = logout ]]	&& mylogout=logout	&& shift
+				[[ "${1}" ]]		&& errmsg="${1}"	&& shift
+				echo "Error: ${errmsg}"			&& \
+				echo "${tmp}" | jq -r '.shortmessage'	&& \
+				echo "${tmp}" | jq -r '.longmessage'	&& \
+				echo
+				$mylogout
+				exit ${err}
+			} \
+			|| : # do nothing, for error 0
+}
+
+read_sid() {
+	# check saved sid
+	file="${sid_file}"
+	[[ -f "${file}" ]] && read -rd '' id trash <"${file}"; [[ "${id}" ]] || { echo -e "${red}Error: no id.${nc}"; beep; exit 9; }
+	sid="${id}"
+}
+
+write_sid() {
+	file="${sid_file}"
+	echo "${sid}" >"${file}"
+}
+
+app_login() {
+	curl -s -X POST \
+		-d "{ \"action\": \"login\", \
+			\"param\": { \
+					\"customernumber\":	\"${cid}\",	\
+					\"apikey\":		\"${key}\",	\
+					\"apipassword\":	\"${pw}\"	\
+					} \
+			}" \
+		"${url}"
+}
+
+app() {
+	action="${1}"
+	# other values set in caller
+	curl -s -X POST \
+		-d "{ \"action\": \"${action}\", \
+			\"param\": { \
+					\"customernumber\":	\"${cid}\",	\
+					\"apikey\":		\"${key}\",	\
+					\"apisessionid\":	\"${sid}\",	\
+					\"clientrequestid\":	\"${client}\",	\
+					\"domainname\":		\"${domain}\"	\
+					} \
+			}" \
+		"${url}"
+}
+
+app_zone() {
+	action="${1}"
+	# other values set in caller
+	curl -s -X POST \
+		-d "{ \"action\": \"${action}\", \
+			\"param\": { \
+					\"customernumber\":	\"${cid}\",	\
+					\"apikey\":		\"${key}\",	\
+					\"apisessionid\":	\"${sid}\",	\
+					\"clientrequestid\":	\"${client}\",	\
+					\"domainname\":		\"${domain}\",	\
+					\"dnszone\": { \
+							\"name\":		\"${domain}\",	\
+							\"ttl\":		\"${ttl}\",	\
+							\"refresh\":		\"${refresh}\",	\
+							\"retry\":		\"${retry}\",	\
+							\"expire\":		\"${expire}\",	\
+							\"dnssecstatus\":	\"${dnssec}\",	\
+							\"serial\":		\"${serial}\"	\
+							} \
+					} \
+			}" \
+		"${url}"
+}
+
+app_records() {
+	action="${1}"
+	# other values set in caller
+	curl -s -X POST \
+		-d "{ \"action\": \"${action}\", \
+			\"param\": { \
+					\"customernumber\":	\"${cid}\",	\
+					\"apikey\":		\"${key}\",	\
+					\"apisessionid\":	\"${sid}\",	\
+					\"clientrequestid\":	\"${client}\",	\
+					\"domainname\":		\"${domain}\",	\
+					\"dnsrecordset\": { \
+							\"dnsrecords\": \
+								[ { \"id\":		\"${rid}\",	\
+								\"hostname\":           \"${host}\",	\
+								\"type\":		\"${type}\",	\
+								\"destination\":	\"${dest}\",	\
+								\"priority\":		\"${prio:-0}\",	\
+								\"deleterecord\":	\"${delrec}\",	\
+								\"state\":		\"yes\"		\
+								} ] \
+							} \
+					} \
+			}" \
+		"${url}"
+}
+
+login() {
+	read_sid
+	tmp=$(app "infoDnsZone" "${domain}")
+	#echo "${domain} - ${tmp}" #&& exit
+	[[ $(echo "${tmp}" | jq -r '.status') != "success" ]] && \
+		{
+			beep #&& exit
+			tmp=$(app_login)
+			sid=$(echo "${tmp}" | jq -r '.responsedata.apisessionid')
+			write_sid
+		}
+	_debug_short
+	_error 1 "Login"
+}
+
+logout() {
+	read_sid
+	tmp=$(app "logout")
+	_debug_short
+	_error 2 "Logout - Cant invalidate session!"
+}
+
+listDomains() {
+	domain="${1}"
+	login
+	tmp=$(app "listallDomains")
+	_debug
+	_error 3 "listDomains"
+	data=$(echo "${tmp}" | jq -r '.responsedata[].domainname')
+	echo "${data}"
+	#logout
+}
+
+infoDomain() {
+	domain="${1}"
+	login
+	tmp=$(app "infoDomain")
+	_debug
+	_error 3 "infoDomain"
+	data=$(echo "${tmp}") #| jq -r '.responsedata[].domainname')
+	echo "${data}"
+	#logout
+}
+
+getSOA() {
+	domain="${1}"
+	login
+	tmp=$(app "infoDnsZone")
+	_debug
+	_error 4 "getSOA"
+	data=$(echo "${tmp}" | jq -r '.responsedata')
+	echo "${data}"
+	#logout
+}
+
+getRecords() {
+	domain="${1}"
+	login
+	tmp=$(app "infoDnsRecords")
+	_debug
+	_error 5 "getRecords"
+	data=$(echo "${tmp}" | jq -r '.responsedata.dnsrecords')
+	echo "${data}"
+	#logout
+}
+
+setSOA() {
+	 domain="${1}"
+	    ttl="${2:-300}"
+	refresh="${3:-3600}"
+	  retry="${4:-900}"
+	 expire="${5:-1209600}"
+	 dnssec="${6:-true}"
+	 serial=""
+	login
+	echo "${domain} ${ttl} ${refresh} ${retry} ${expire} ${dnssec}"
+	tmp=$(app_zone "updateDnsZone")
+	_debug
+	_error 6 "setSOA"
+	#logout
+}
+
+setDNSSEC() {
+	domain="${1}"
+	dnssec="${2:-true}"
+	serial=""
+	login
+	# get current soa settings
+	mysoa=$(getSOA "${domain}")
+	mysoa=$(echo "${mysoa}" | grep '^{$\|^ .*\|^}$') # because debug -d
+	#echo "${mysoa}"
+	    ttl=$(echo "${mysoa}" | jq -r '.ttl')
+	refresh=$(echo "${mysoa}" | jq -r '.refresh')
+	  retry=$(echo "${mysoa}" | jq -r '.retry')
+	 expire=$(echo "${mysoa}" | jq -r '.expire')
+	echo "${domain} ${ttl} ${refresh} ${retry} ${expire} ${dnssec}"
+	tmp=$(app_zone "updateDnsZone")
+	_debug
+	_error 7 "setDNSSEC"
+	#logout
+}
+
+prep_recordtype() {
+	# values set in caller
+	if [[ "${type^^}" == "CAA" ]]; then
+		if [[ "$(echo ${dest} | cut -d' ' -f2)" == "issue"     ]] || \
+		   [[ "$(echo ${dest} | cut -d' ' -f2)" == "iodef"     ]] || \
+		   [[ "$(echo ${dest} | cut -d' ' -f2)" == "issuewild" ]]; then
+			prepstate=$(echo "${dest}" | cut -d' ' -f3)
+			dest=${dest//${prepstate}/\\"\"${prepstate}\\"\"}
+		else
+			echo "Error: Please Check your CAA Record"
+			#logout
+			exit 20
+		fi
+	fi
+}
+
+addRecord() {
+	domain="${1}"
+declare -i rid=""
+	  host="${2}"
+	  type="${3^^}"
+	  dest="${4}"
+	  prio="${5:-0}"
+	delrec="false"
+	login
+	prep_recordtype
+	#echo "${domain} ${rid} ${host} ${type} ${dest} ${prio} ${delrec}" # get rid below
+	tmp=$(app_records "updateDnsRecords")
+	_debug
+	_error 10 "addRecord"
+	rid=$(echo "${tmp}" | jq --arg host "${host}" --arg type "${type}" --arg dest "${dest}" \
+		'.responsedata.dnsrecords[] | select(.hostname==$host and .type==$type and .destination==$dest) .id' | tr -d '\"')
+	echo "${domain} ${rid} ${host} ${type} ${dest} ${prio} ${delrec}"
+	#logout
+}
+
+modRecord() {
+	domain="${1}"
+	   rid="${2}"
+	  host="${3}"
+	  type="${4^^}"
+	  dest="${5}"
+	  prio="${6:-0}"
+	delrec="false"
+	login
+	prep_recordtype
+	echo "${domain} ${rid} ${host} ${type} ${dest} ${prio} ${delrec}"
+	tmp=$(app_records "updateDnsRecords")
+	_debug
+	_error 11 "modRecord"
+	#logout
+}
+
+delRecord() {
+	domain="${1}"
+	   rid="${2}"
+	  host="${3}"
+	  type="${4^^}"
+	  dest="${5}"
+	  prio="${6:-0}"
+	delrec="true"
+	login
+	prep_recordtype
+	echo "${domain} ${rid} ${host} ${type} ${dest} ${prio} ${delrec}"
+	tmp=$(app_records "updateDnsRecords")
+	_debug
+	_error 12 "delRecord"
+	#logout
+}
+
+backup() {
+	domain="${1}"
+	login
+	debug=false
+	soa=$(getSOA "${domain}")
+	records=$(getRecords "${domain}")
+	data="{\"soa\":${soa},\"records\":${records}}"
+	file="${domain}-$(date +'%Y%m%d-%H%M%S').txt"
+	echo "${data}" >"${file}"
+	echo "Backup done -> ${file}"
+	#logout
+}
+
+#
+restore() {
+	       bfile=$(cat  "${1}")	|| { echo "Error: File not found."; exit 15; }
+	      domain=$(echo "${bfile}"	| jq -r '.soa.name')
+	         ttl=$(echo "${bfile}"	| jq -r '.soa.ttl')
+	     refresh=$(echo "${bfile}"	| jq -r '.soa.refresh')
+	       retry=$(echo "${bfile}"	| jq -r '.soa.retry')
+	      expire=$(echo "${bfile}"	| jq -r '.soa.expire')
+	      dnssec=$(echo "${bfile}"	| jq -r '.soa.dnssecstatus')
+	login
+	debug=false
+
+	# update soa
+	echo "${domain} ${ttl} ${refresh} ${retry} ${expire} ${dnssec}"
+	tmp=$(app_zone "updateDnsZone")
+	_debug
+	_error 17 "restore"
+
+	# delete all records
+	del_records=""
+	inc=0
+	cur_rec=$(getRecords "${domain}")
+	[[ "${cur_rec}" ]] && len=$(echo "${cur_rec}" | jq '. | length') || len=0
+
+	echo -e "del_records: ${len}\n${cur_rec}"; #exit
+
+	while [[ ${inc} -lt ${len} ]]; do
+		 rid=$(echo "${cur_rec}" | jq -r ".[${inc}].id")
+		host=$(echo "${cur_rec}" | jq -r ".[${inc}].hostname")
+		type=$(echo "${cur_rec}" | jq -r ".[${inc}].type")
+		prio=$(echo "${cur_rec}" | jq -r ".[${inc}].priority")
+		dest=$(echo "${cur_rec}" | jq -r ".[${inc}].destination")
+
+#		# -
+		if [ "$type" == "CAA" ] || [ "$type" == "caa" ]; then
+			if [ "$(echo "$dest" | cut -d' ' -f2)" == "issue" ] || [ "$(echo "$dest" | cut -d' ' -f2)" == "iodef" ] || [ "$(echo "$dest" | cut -d' ' -f2)" == "issuewild" ]; then
+				prepstate=$(echo "$dest" | cut -d' ' -f3)
+				# shellcheck disable=SC2001
+				dest=$(echo "$dest" | sed 's/\"/\\"/g')
+			else
+				echo "Error: Please Check your CAA Record"
+				#logout
+				exit 21
+			fi
+		else
+			dest="${dest}"
+		fi
+#		# -
+
+		inc=$((inc+1))
+
+		tmp_record="{\"id\": \"${rid}\", \"hostname\": \"${host}\", \"type\": \"${type}\", \
+			\"priority\": \"${prio}\", \"destination\": \"${dest}\", \"deleterecord\": \"true\", \"state\": \"yes\"}"
+
+		if [[ ${inc} -ne $((len)) ]]; then
+			del_records+="${tmp_record},"
+		else
+			del_records+="${tmp_record}"
+		fi
+	done
+
+	echo -e "---\n${del_records}\n---"; #exit
+
+	[[ "${#del_records}" -gt 0 ]] && {
+		tmp=$(curl -s -X POST \
+			-d "{\"action\": \"updateDnsRecords\", \
+				\"param\": { \
+						\"customernumber\":	\"${cid}\",	\
+						\"apikey\":		\"${key}\",	\
+						\"apisessionid\":	\"${sid}\",	\
+						\"clientrequestid\":	\"${client}\",	\
+						\"domainname\":		\"${domain}\",	\
+						\"dnsrecordset\": { \
+									\"dnsrecords\": [ ${del_records} ] \
+									} \
+						} \
+				}" \
+			"${url}")
+	}
+	_debug
+	_error 18 "restore"
+
+	# add all records
+	add_records=""
+	inc=0
+	len=$(echo "${bfile}" | jq -r '.records | length') || len=0
+
+	echo -e "add_records: ${len}"; #exit
+
+	while [[ ${inc} -lt ${len} ]]; do
+		host=$(echo "${bfile}" | jq -r ".records[${inc}].hostname")
+		type=$(echo "${bfile}" | jq -r ".records[${inc}].type")
+		prio=$(echo "${bfile}" | jq -r ".records[${inc}].priority")
+		dest=$(echo "${bfile}" | jq -r ".records[${inc}].destination")
+
+#		# -
+		if [ "$type" == "CAA" ] || [ "$type" == "caa" ]; then
+			if [ "$(echo "$dest" | cut -d' ' -f2)" == "issue" ] || [ "$(echo "$dest" | cut -d' ' -f2)" == "iodef" ] || [ "$(echo "$dest" | cut -d' ' -f2)" == "issuewild" ]; then
+				prepstate=$(echo "$dest" | cut -d' ' -f3)
+				# shellcheck disable=SC2001
+				dest=$(echo "$dest" | sed 's/\"/\\"/g')
+			else
+				echo "Error: Please Check your CAA Record"
+				#logout
+				exit 22
+			fi
+		else
+			dest="${dest}"
+		fi
+#		# -
+
+		inc=$((inc+1))
+
+		tmp_record="{\"id\": \"\", \"hostname\": \"${host}\", \"type\": \"${type}\", \
+			\"priority\": \"${prio}\", \"destination\": \"${dest}\", \"deleterecord\": \"false\", \"state\": \"yes\"}"
+
+		if [[ ${inc} -ne $((len)) ]]; then
+			add_records+="${tmp_record},"
+		else
+			add_records+="${tmp_record}"
+		fi
+	done
+
+	echo -e "---\n${add_records}\n---"; #exit
+
+	[[ "${#add_records}" -gt 0 ]] && {
+		tmp=$(curl -s -X POST \
+			-d "{\"action\": \"updateDnsRecords\", \
+				\"param\": { \
+						\"customernumber\":	\"${cid}\",	\
+						\"apikey\":		\"${key}\",	\
+						\"apisessionid\":	\"${sid}\",	\
+						\"clientrequestid\":	\"${client}\",	\
+						\"domainname\":		\"${domain}\",	\
+						\"dnsrecordset\": { \
+									\"dnsrecords\": [ ${add_records} ] \
+									} \
+						} \
+				}" \
+			"${url}")
+	}
+	_debug
+	_error 19 "restore"
+	echo "Restore done."
+	#logout
+}
+
+help() {
+	echo "${0##*/} ${version} usage:"
+	echo
+	echo "IMPORTANT: Only ONE Argument like -N or -dN"
+	echo "If you have a string which is including spaces use \"around your string\""
+	echo
+	echo "-d  Debug Mode        ${0##*/} -d..."
+	echo "-N  NEW Record        ${0##*/} -N DOMAIN    HOST RECORDTYPE DESTINATION [PRIORITY]"
+	echo "-M  MOD Record        ${0##*/} -M DOMAIN ID HOST RECORDTYPE DESTINATION [PRIORITY]"
+	echo "-D  DEL Record        ${0##*/} -D DOMAIN ID HOST RECORDTYPE DESTINATION [PRIORITY]"
+	echo "-g  Get all Records   ${0##*/} -g DOMAIN"
+	echo "-b  Backup Zone       ${0##*/} -b DOMAIN"
+	echo "-R  Restore Zone      ${0##*/} -R FILE		(experimental)"
+	echo "-s  Get SOA           ${0##*/} -s DOMAIN"
+	echo "-S  Set SOA           ${0##*/} -S DOMAIN TTL REFRESH RETRY EXPIRE DNSSECSTATUS"
+	echo "-l  List all Domains  ${0##*/} -l			(resellers only)"
+	echo "-i  Info for Domain   ${0##*/} -i DOMAIN		(resellers only)"
+	echo "-x  Session logout"
+	echo "-z  Set DNSSEC        ${0##*/} -z DOMAIN true|false"
+	echo "-h  Help"
+	echo
+	echo "Examples:"
+	echo "New CAA Record:  ${0##*/} -N example.com @ CAA \"0 issue letsencrypt.org\""
+	echo "New   A Record:  ${0##*/} -N example.com @ A 127.0.0.1"
+	echo "New  MX Record:  ${0##*/} -N example.com @ MX mail.example.com. 10"
+	echo "Get all records: ${0##*/} -g example.com"
+	echo "Delete Record:   ${0##*/} -D 1234567 example.com @ A 127.0.0.1"
+	echo "Change SOA:      ${0##*/} -S example.com  300   3600   900 1209600 true"
+	echo "                                     (86400  28800  7200 1209600 true)"
+	echo "                                     (  ttl refresh retry expire dnssec)"
+	echo "Change DNSSEC:   ${0##*/} -z example.com true"
+	echo
+}
+
+# begin script
+[[ ${#} -eq 0 ]] && echo "No Argument" && help
+
+while getopts 'dNMDgbRsSlixzh' opt
+do
+	case ${opt} in
+		d) debug=true ;;
+		N) addRecord	"$2" "$3" "$4" "$5" "$6" ;;
+		M) modRecord	"$2" "$3" "$4" "$5" "$6" "$7" ;;
+		D) delRecord	"$2" "$3" "$4" "$5" "$6" "$7" "$8" ;;
+		g) getRecords	"$2" ;;
+		b) backup	"$2" ;;
+		R) restore	"$2" ;;
+		s) getSOA	"$2" ;;
+		S) setSOA	"$2" "$3" "$4" "$5" "$6" "$7" ;;
+		l) listDomains  "$2" ;;
+		i) infoDomain	"$2" ;;
+		x) logout ;;
+		z) setDNSSEC	"$2" "$3" ;;
+		h|?) help ;;
+	esac
+done
+shift $((OPTIND-1))
