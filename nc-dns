@@ -10,7 +10,7 @@
 # recommended:	pass
 #
 # todo:
-# test restore w/ caa
+# restore / restore w/ caa
 
 version="v1.0"
 
@@ -29,6 +29,8 @@ debug=false
 _debug()	{ [[ ${debug} = true ]] && echo "${tmp}"; }
 _debug_short()	{ [[ ${debug} = true ]] && echo "${tmp}" | jq -r '.shortmessage'; }
 _debug_curl()	{ curl --trace-ascii - ; } # currently not used
+
+_echo_data()	{ echo "${data}" | column -ts ':'; }
 
 _error()	{ [[ $(echo "${tmp}" | jq -r '.status') != "success" ]] && \
 			{
@@ -166,7 +168,7 @@ listDomains() {
 	_debug
 	_error 3 "listDomains"
 	data=$(echo "${tmp}" | jq -r '.responsedata[].domainname')
-	echo "${data}"
+	_echo_data #echo "${data}"
 	#logout
 }
 
@@ -175,9 +177,9 @@ infoDomain() {
 	login
 	tmp=$(app "infoDomain")
 	_debug
-	_error 3 "infoDomain"
+	_error 4 "infoDomain"
 	data=$(echo "${tmp}") #| jq -r '.responsedata[].domainname')
-	echo "${data}"
+	_echo_data #echo "${data}"
 	#logout
 }
 
@@ -186,9 +188,9 @@ getSOA() {
 	login
 	tmp=$(app "infoDnsZone")
 	_debug
-	_error 4 "getSOA"
+	_error 5 "getSOA"
 	data=$(echo "${tmp}" | jq -r '.responsedata')
-	echo "${data}"
+	_echo_data #echo "${data}"
 	#logout
 }
 
@@ -197,9 +199,9 @@ getRecords() {
 	login
 	tmp=$(app "infoDnsRecords")
 	_debug
-	_error 5 "getRecords"
+	_error 6 "getRecords"
 	data=$(echo "${tmp}" | jq -r '.responsedata.dnsrecords')
-	echo "${data}"
+	_echo_data #echo "${data}"
 	#logout
 }
 
@@ -215,7 +217,7 @@ setSOA() {
 	echo "${domain} ${ttl} ${refresh} ${retry} ${expire} ${dnssec}"
 	tmp=$(app_zone "updateDnsZone")
 	_debug
-	_error 6 "setSOA"
+	_error 7 "setSOA"
 	#logout
 }
 
@@ -235,7 +237,7 @@ setDNSSEC() {
 	echo "${domain} ${ttl} ${refresh} ${retry} ${expire} ${dnssec}"
 	tmp=$(app_zone "updateDnsZone")
 	_debug
-	_error 7 "setDNSSEC"
+	_error 8 "setDNSSEC"
 	#logout
 }
 
