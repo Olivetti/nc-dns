@@ -4,13 +4,14 @@
 # nc-dns
 # © Olivetti 2020-2023
 #
-# based & developed by linux-insideDE @GPN18
+# based on ncdapi.sh by linux-insideDE @GPN18
 #
 # dependencies:	curl, jq
 # recommended:	pass
 #
 # todo:
-# restore / restore w/ caa
+# restore
+# restore w/ caa
 
 version="v1.0"
 
@@ -30,7 +31,7 @@ _debug()	{ [[ ${debug} = true ]] && echo "${tmp}"; }
 _debug_short()	{ [[ ${debug} = true ]] && echo "${tmp}" | jq -r '.shortmessage'; }
 _debug_curl()	{ curl --trace-ascii - ; } # currently not used
 
-_echo_data()	{ echo "${data}" | column -ts ':'; }
+_echo_data()	{ echo "${data}" | sed 's/:/:#/' | column -ts '#'; }
 
 _error()	{ [[ $(echo "${tmp}" | jq -r '.status') != "success" ]] && \
 			{

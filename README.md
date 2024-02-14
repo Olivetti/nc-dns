@@ -12,10 +12,10 @@ based on [linxside's ncdapi](https://github.com/linxside/ncdapi)
 
 ### Installation
 1. [Download & unpack](https://github.com/Olivetti/nc-dns/releases/latest/download/nc-dns.tar.gz)
-2. Set executable   ```chmod +x nc-dns```
-3. Create sidfile   ```echo "0" > ~/.nc-dns.sid```
-4. Change file mode ```chmod 600 ~/.nc-dns.sid```
-5. Edit credentials ```nano env```
+2. Set executable   `chmod +x nc-dns`
+3. Create sidfile   `echo "0" > ~/.nc-dns.sid`
+4. Change file mode `chmod 600 ~/.nc-dns.sid`
+5. Edit credentials `nano env`
 
 ### Usage
 - ./nc-dns -h
