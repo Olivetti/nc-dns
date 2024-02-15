@@ -19,12 +19,15 @@ version="v1.0"
 source "${0%/*}/env"
 
 # for color and sound
-[[ -f ~/bin/tools ]] && source ~/bin/tools
+beep() { echo -ne "\a"; }
+     red='\033[0;31m'
+   green='\033[0;32m'
+      nc='\033[0m'
 
 sid_file=~/".${0##*/}.sid" # @ $HOME # sid_file="${0%/*}/.${0##*/}.sid"
-url="https://ccp.netcup.net/run/webservice/servers/endpoint.php?JSON"
-client=""
-debug=false
+     url="https://ccp.netcup.net/run/webservice/servers/endpoint.php?JSON"
+  client=""
+   debug=false
 
 # functions
 _debug()	{ [[ ${debug} = true ]] && echo "${tmp}"; }
@@ -45,7 +48,7 @@ _error()	{ [[ $(echo "${tmp}" | jq -r '.status') != "success" ]] && \
 				$mylogout
 				exit ${err}
 			} \
-			|| : # do nothing, for error 0
+			|| : # do nothing, error 0
 }
 
 read_sid() {
@@ -245,9 +248,9 @@ setDNSSEC() {
 prep_recordtype() {
 	# values set in caller
 	if [[ "${type^^}" == "CAA" ]]; then
-		if [[ "$(echo ${dest} | cut -d' ' -f2)" == "issue"     ]] || \
-		   [[ "$(echo ${dest} | cut -d' ' -f2)" == "iodef"     ]] || \
-		   [[ "$(echo ${dest} | cut -d' ' -f2)" == "issuewild" ]]; then
+		if [[ $(echo "${dest}" | cut -d' ' -f2) == "issue"     ]] || \
+		   [[ $(echo "${dest}" | cut -d' ' -f2) == "iodef"     ]] || \
+		   [[ $(echo "${dest}" | cut -d' ' -f2) == "issuewild" ]]; then
 			prepstate=$(echo "${dest}" | cut -d' ' -f3)
 			dest=${dest//${prepstate}/\\"\"${prepstate}\\"\"}
 		else
@@ -315,8 +318,8 @@ delRecord() {
 backup() {
 	domain="${1}"
 	login
-	debug=false
-	soa=$(getSOA "${domain}")
+	  debug=false
+	    soa=$(getSOA     "${domain}")
 	records=$(getRecords "${domain}")
 	data="{\"soa\":${soa},\"records\":${records}}"
 	file="${domain}-$(date +'%Y%m%d-%H%M%S').txt"
@@ -327,13 +330,13 @@ backup() {
 
 #
 restore() {
-	       bfile=$(cat  "${1}")	|| { echo "Error: File not found."; exit 15; }
-	      domain=$(echo "${bfile}"	| jq -r '.soa.name')
-	         ttl=$(echo "${bfile}"	| jq -r '.soa.ttl')
-	     refresh=$(echo "${bfile}"	| jq -r '.soa.refresh')
-	       retry=$(echo "${bfile}"	| jq -r '.soa.retry')
-	      expire=$(echo "${bfile}"	| jq -r '.soa.expire')
-	      dnssec=$(echo "${bfile}"	| jq -r '.soa.dnssecstatus')
+	  bfile=$(cat  "${1}")	  || { echo "Error: File not found."; exit 15; }
+	 domain=$(echo "${bfile}" | jq -r '.soa.name')
+	    ttl=$(echo "${bfile}" | jq -r '.soa.ttl')
+	refresh=$(echo "${bfile}" | jq -r '.soa.refresh')
+	  retry=$(echo "${bfile}" | jq -r '.soa.retry')
+	 expire=$(echo "${bfile}" | jq -r '.soa.expire')
+	 dnssec=$(echo "${bfile}" | jq -r '.soa.dnssecstatus')
 	login
 	debug=false
 
