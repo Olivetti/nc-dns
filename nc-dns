@@ -27,7 +27,7 @@ usage() { sed -n '4,20p' "${0}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 API_BASE="${NETCUP_API_BASE:-https://api.netcup.com/v1}"
 CONFIG_FILE="${NETCUP_CONFIG:-$HOME/.config/nc-dns/.env}"
 
-if [[ -f "${CONFIG_FILE}" ]]; then
+if [[ -s "${CONFIG_FILE}" ]]; then
   # shellcheck disable=SC1090
   source "${CONFIG_FILE}"
 fi
@@ -67,7 +67,7 @@ api_get() {
     rm -f "${tmp}"
     die "curl-Aufruf fehlgeschlagen (Netzwerk?)"
   fi
-  if [[ "$code" != 2* ]]; then
+  if [[ "${code}" != 2* ]]; then
     echo "HTTP $code bei GET /${path}" >&2
     jq . "${tmp}" >&2 2>/dev/null || cat "${tmp}" >&2
     echo >&2
@@ -178,10 +178,10 @@ main() {
   shift || true
   case "${cmd}" in
     -h|--help|help) usage 0 ;;
-    paths)     need_tools; cmd_paths "${@}" ;;
-    domain)    need_tools; need_key; cmd_domain "${@}" ;;
+    paths)     need_tools;           cmd_paths     "${@}" ;;
+    domain)    need_tools; need_key; cmd_domain    "${@}" ;;
     revisions) need_tools; need_key; cmd_revisions "${@}" ;;
-    records)   need_tools; need_key; cmd_records "${@}" ;;
+    records)   need_tools; need_key; cmd_records   "${@}" ;;
     *) usage 1 ;;
   esac
 }
