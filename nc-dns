@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+#set -vux
+#
+# nc-dns
+# netcup REST-API (https://api.netcup.com/v1)
+# © Olivetti 2026
+#
+# dependencies: curl, jq
+#
+# Konfiguration (Umgebungsvariablen oder Datei ~/.config/nc-dns/.env):
+#   NETCUP_API_KEY   der 64-stellige Key aus dem CCP unter "API Keys" (NICHT "Legacy API Keys")
+#   NETCUP_DEBUG=1   zeigt die URLs und rohen API-Antworten
+#
+# Aufrufe:
+# nc-dns domain    example.com                 # Domain-Infos (ID, isDnsManaged)
+# nc-dns revisions example.com                 # DNS-Revisionen der Zone auflisten
+# nc-dns records   example.com [REVISION-UUID] # DNS-Records anzeigen (Standard: neueste Revision)
+# nc-dns records   example.com --json          # Records als rohes JSON
+# nc-dns paths     nc-openapi.json             # Endpunkte aus der OpenAPI-Spec auflisten
+
+set -euo pipefail
+
+version="v0.1"
+
+usage() { sed -n '4,20p' "${0}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+API_BASE="${NETCUP_API_BASE:-https://api.netcup.com/v1}"
+CONFIG_FILE="${NETCUP_CONFIG:-$HOME/.config/nc-dns/.env}"
+
+if [[ -f "${CONFIG_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  source "${CONFIG_FILE}"
+fi
+
+die()  { echo "Fehler: ${*}" >&2; exit 1; }
+dbg()  { [[ "${NETCUP_DEBUG:-0}" == "1" ]] && echo "[debug] ${*}" >&2 || true; }
+
+
+need_tools() {
+  local t
+  for t in curl jq; do
+    command -v "${t}" >/dev/null 2>&1 || die "'${t}' wird benötigt, ist aber nicht installiert."
+  done
+}
+
+need_key() {
+  [[ -n "${NETCUP_API_KEY:-}" ]] || die "NETCUP_API_KEY ist nicht gesetzt (siehe Kopf des Skripts)."
+  if [[ ${#NETCUP_API_KEY} -ne 64 ]]; then
+    echo "Hinweis: Der Key hat ${#NETCUP_API_KEY} statt 64 Zeichen – das sieht nach einem Legacy-CCP-Key aus," >&2
+    echo "         der für api.netcup.com/v1 nicht funktioniert." >&2
+  fi
+}
+
+check_fqdn() {
+  [[ "${1}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || die "Ungültiger Domainname: '${1}'"
+}
+
+# GET gegen die API; Antwort-Body auf stdout, Fehler auf stderr
+api_get() {
+  local path="${1}" tmp code
+  tmp="$(mktemp)"
+  dbg "GET ${API_BASE}/${path}"
+  if ! code="$(curl -sS -o "${tmp}" -w '%{http_code}' \
+        -H "Authorization: Bearer ${NETCUP_API_KEY}" \
+        -H "Accept: application/json" \
+        "${API_BASE}/${path}")"; then
+    rm -f "${tmp}"
+    die "curl-Aufruf fehlgeschlagen (Netzwerk?)"
+  fi
+  if [[ "$code" != 2* ]]; then
+    echo "HTTP $code bei GET /${path}" >&2
+    jq . "${tmp}" >&2 2>/dev/null || cat "${tmp}" >&2
+    echo >&2
+    rm -f "${tmp}"
+    return 1
+  fi
+  dbg "Antwort: $(cat "${tmp}")"
+  cat "${tmp}"
+  rm -f "${tmp}"
+}
+
+# Domain-Objekt {id, fqdn, isDnsManaged} als kompaktes JSON
+get_domain_obj() {
+  local fqdn="${1}" resp obj
+  resp="$(api_get "domain?fqdn=${fqdn}")" || return 1
+  obj="$(jq -c '.result[0] // empty' <<<"${resp}")"
+  if [[ -z "${obj}" ]]; then
+    echo "Domain '${fqdn}' wurde in diesem Account nicht gefunden." >&2
+    return 1
+  fi
+  printf '%s\n' "${obj}"
+}
+
+# gibt die Tabelle schön formatiert aus (column, falls vorhanden)
+as_table() {
+  if command -v column >/dev/null 2>&1; then column -t -s $'\t'; else cat; fi
+}
+
+cmd_domain() {
+  local fqdn="${1:-}"; [[ -n "${fqdn}" ]] || usage 1
+  check_fqdn "${fqdn}"
+  get_domain_obj "${fqdn}" | jq .
+}
+
+cmd_revisions() {
+  local fqdn="${1:-}"; [[ -n "${fqdn}" ]] || usage 1
+  check_fqdn "${fqdn}"
+  local obj id
+  obj="$(get_domain_obj "${fqdn}")" || exit 1
+  id="$(jq -r '.id' <<<"${obj}")"
+  api_get "domain/${id}/dns/revision?perPage=100" \
+    | jq -r '(["IDENTIFIER","STATE","SERIAL","CREATED","MODIFIED"] | @tsv),
+             (.result | sort_by(.createdAt) | reverse[]
+              | [.identifier, .state, (.serial // "-" | tostring), .createdAt, .modifiedAt] | @tsv)' \
+    | as_table
+}
+
+cmd_records() {
+  local fqdn="${1:-}"; [[ -n "${fqdn}" ]] || usage 1
+  shift
+  check_fqdn "${fqdn}"
+
+  local rev="" raw=0 a
+  for a in "${@}"; do
+    case "${a}" in
+      --json) raw=1 ;;
+      *) rev="${a}" ;;
+    esac
+  done
+
+  local obj id managed
+  obj="$(get_domain_obj "${fqdn}")" || exit 1
+  id="$(jq -r '.id // empty' <<<"${obj}")"
+  managed="$(jq -r 'if has("isDnsManaged") then (.isDnsManaged | tostring) else empty end' <<<"${obj}")"
+  [[ -n "${id}" ]] || die "Keine Domain-ID in der Antwort gefunden."
+
+  echo "Domain: ${fqdn}   ID: ${id}   isDnsManaged: ${managed:-?}" >&2
+  if [[ "$managed" == "false" ]]; then
+    echo "Hinweis: isDnsManaged=false – vermutlich zeigen die Nameserver der Domain nicht auf netcup." >&2
+    echo "         Die gezeigten Records sind die netcup-seitige Zone und nicht zwingend das, was live aufgelöst wird." >&2
+  fi
+
+  if [[ -z "$rev" ]]; then
+    local revs
+    revs="$(api_get "domain/${id}/dns/revision?perPage=100")" || exit 1
+    rev="$(jq -r '.result | sort_by(.createdAt) | last | .identifier // empty' <<<"${revs}")"
+    [[ -n "${rev}" ]] || die "Keine DNS-Revision für diese Domain gefunden."
+    jq -r '.result | sort_by(.createdAt) | last
+           | "Revision: \(.identifier)   state: \(.state)   serial: \(.serial // "-")   created: \(.createdAt)"' \
+       <<<"${revs}" >&2
+    echo "(neueste Revision; mit '${0} revisions ${fqdn}' siehst du alle, eine andere gibst du als 3. Argument an)" >&2
+  fi
+
+  local resp
+  resp="$(api_get "domain/${id}/dns/revision/${rev}/record")" || exit 1
+  if [[ "${raw}" == 1 ]]; then
+    jq . <<<"${resp}"
+    return
+  fi
+  jq -r '(["NAME","TYPE","TTL","RDATA"] | @tsv),
+         (.result | sort_by(.type, .name)[]
+          | [.name, .type, (.ttl // "-" | tostring), .rdata] | @tsv)' <<<"${resp}" | as_table
+}
+
+cmd_paths() {
+  local spec="${1:-}"; [[ -f "${spec}" ]] || die "Bitte Pfad zur OpenAPI-Datei angeben (JSON)."
+  jq -r '
+    .paths | to_entries[] | .key as ${p}
+    | .value | to_entries[]
+    | select(.key | test("^(get|post|put|patch|delete)$"))
+    | "\(.key | ascii_upcase)\t\(${p})"
+  ' "${spec}" | sort -k2 | as_table
+}
+
+main() {
+  local cmd="${1:-}"
+  [[ -n "${cmd}" ]] || usage 1
+  shift || true
+  case "${cmd}" in
+    -h|--help|help) usage 0 ;;
+    paths)     need_tools; cmd_paths "${@}" ;;
+    domain)    need_tools; need_key; cmd_domain "${@}" ;;
+    revisions) need_tools; need_key; cmd_revisions "${@}" ;;
+    records)   need_tools; need_key; cmd_records "${@}" ;;
+    *) usage 1 ;;
+  esac
+}
+
+main "${@}"
